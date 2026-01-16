@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hybrid-qcnn-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - SECRET_KEY=${SECRET_KEY:-your-super-secret-key-change-in-production}
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./checkpoints:/app/checkpoints
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - qcnn-network
+
+  # Streamlit Dashboard
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hybrid-qcnn-streamlit
+    command: ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./checkpoints:/app/checkpoints
+      - ./data:/app/data
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - qcnn-network
+
+  # Redis for async task queue (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: hybrid-qcnn-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - qcnn-network
+
+  # PostgreSQL for logging (optional)
+  postgres:
+    image: postgres:15-alpine
+    container_name: hybrid-qcnn-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-qcnn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qcnn_password}
+      POSTGRES_DB: ${POSTGRES_DB:-glioma_detection}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - qcnn-network
+
+  # Nginx reverse proxy (optional)
+  nginx:
+    image: nginx:alpine
+    container_name: hybrid-qcnn-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - streamlit
+    restart: unless-stopped
+    networks:
+      - qcnn-network
+    profiles:
+      - production
+
+volumes:
+  redis_data:
+  postgres_data:
+
+networks:
+  qcnn-network:
+    driver: bridge
