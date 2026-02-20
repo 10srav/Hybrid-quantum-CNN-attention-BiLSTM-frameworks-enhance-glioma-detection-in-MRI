@@ -65,7 +65,7 @@ def parse_args():
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=1e-5,
                         help='Weight decay')
-    parser.add_argument('--patience', type=int, default=10,
+    parser.add_argument('--patience', type=int, default=20,
                         help='Early stopping patience')
     
     # Checkpointing
@@ -284,8 +284,9 @@ def main():
     num_params = count_parameters(model)
     print(f"Model parameters: {num_params:,}")
     
-    # Loss and optimizer
-    criterion = nn.CrossEntropyLoss()
+    # Loss and optimizer — weighted to handle class imbalance (non-glioma:glioma ~= 3:1)
+    class_weights = torch.tensor([1.0, 3.0], dtype=torch.float).to(device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.AdamW(
         model.parameters(),
         lr=args.lr,
